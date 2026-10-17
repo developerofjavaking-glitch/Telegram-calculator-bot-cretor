@@ -1,0 +1,6 @@
+{
+  "name": "Telegram Calculator Bot & Live Logger",
+  "description": "Instant JavaScript-powered Telegram Calculator Bot with direct long-polling connection and real-time activity and math calculation log system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
