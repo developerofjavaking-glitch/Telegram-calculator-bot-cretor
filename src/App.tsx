@@ -13,16 +13,16 @@ import {
   ClipboardPaste,
   Terminal,
   Activity,
+  Clock,
 } from 'lucide-react';
-import { BotInfo, BotWorkerStatus } from './types';
-import { safeFetchJson } from './utils/api';
+import { BotInfo } from './types';
+import { webBot } from './services/webBotWorker';
 import { BotActiveCard } from './components/BotActiveCard';
 import { LiveLogViewer } from './components/LiveLogViewer';
 import { TelegramSimulator } from './components/TelegramSimulator';
 import { JsCodeViewer } from './components/JsCodeViewer';
 import { BotFatherGuide } from './components/BotFatherGuide';
 import { MathCheatSheet } from './components/MathCheatSheet';
-import { VercelGuide } from './components/VercelGuide';
 
 export default function App() {
   const [lang, setLang] = useState<'bn' | 'en'>('bn');
@@ -31,23 +31,22 @@ export default function App() {
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activeBot, setActiveBot] = useState<BotInfo | null>(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
-  const [botMode, setBotMode] = useState<'webhook' | 'polling'>('polling');
-  const [botWebhookUrl, setBotWebhookUrl] = useState<string | undefined>();
-  const [activeTab, setActiveTab] = useState<'logs' | 'simulator' | 'code' | 'guide' | 'cheat' | 'vercel'>('logs');
+  const [activeTab, setActiveTab] = useState<'logs' | 'simulator' | 'code' | 'guide' | 'cheat'>('logs');
   const [statusMessage, setStatusMessage] = useState<string>('');
 
-  const isVercelHost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('vercel.dev'));
-
-  // Check initial worker status on load
   useEffect(() => {
-    safeFetchJson<BotWorkerStatus>('/api/bot/status').then((res) => {
-      if (res.ok && res.data?.isRunning && res.data?.botInfo) {
-        setActiveBot(res.data.botInfo);
-        setIsBotRunning(true);
-      }
-    });
+    // Sync with webBot manager
+    webBot.setCallbacks(
+      () => {},
+      (running) => setIsBotRunning(running)
+    );
+
+    // Initial status check
+    const status = webBot.getStatus();
+    if (status.isRunning && status.botInfo) {
+      setActiveBot(status.botInfo);
+      setIsBotRunning(true);
+    }
   }, []);
 
   const handlePaste = async () => {
@@ -86,36 +85,17 @@ export default function App() {
     setIsActivating(true);
     setActivationError(null);
     setStatusMessage(
-      isVercelHost
-        ? lang === 'bn'
-          ? 'Vercel Serverless Webhook কানেক্ট করা হচ্ছে...'
-          : 'Connecting Vercel Serverless Webhook...'
-        : lang === 'bn'
-        ? 'টেলিগ্রাম সার্ভারের সাথে সরাসরি লং-পোলিং কানেক্ট করা হচ্ছে...'
-        : 'Connecting to Telegram servers via Long Polling...'
+      lang === 'bn'
+        ? 'ওয়েব সেশনে বট কানেক্ট করা হচ্ছে...'
+        : 'Connecting bot to this web session...'
     );
 
     try {
-      const result = await safeFetchJson<{
-        ok: boolean;
-        mode?: 'webhook' | 'polling';
-        webhookUrl?: string;
-        botInfo: BotInfo;
-        description?: string;
-      }>('/api/bot/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          targetUrl: window.location.origin,
-          mode: isVercelHost ? 'webhook' : 'auto',
-        }),
-      });
+      const result = await webBot.start(token);
 
-      if (!result.ok || !result.data?.ok) {
+      if (!result.ok || !result.botInfo) {
         setActivationError(
-          result.error ||
-            result.data?.description ||
+          result.description ||
             (lang === 'bn'
               ? 'বট কানেক্ট করতে সমস্যা হয়েছে। টোকেনটি সঠিক কি না পরীক্ষা করুন।'
               : 'Failed to connect bot. Please verify your token.')
@@ -124,11 +104,9 @@ export default function App() {
         return;
       }
 
-      setActiveBot(result.data.botInfo);
+      setActiveBot(result.botInfo);
       setIsBotRunning(true);
-      setBotMode(result.data.mode || 'polling');
-      setBotWebhookUrl(result.data.webhookUrl);
-      setActiveTab('logs'); // Automatically switch to logs to see live activity!
+      setActiveTab('logs'); // Automatically switch to live logs
     } catch (err: any) {
       setActivationError(err.message || 'Connection error. Please try again.');
     } finally {
@@ -137,12 +115,14 @@ export default function App() {
   };
 
   const handleStopBot = async () => {
-    try {
-      await safeFetchJson('/api/bot/stop', { method: 'POST' });
-      setIsBotRunning(false);
-    } catch (err) {
-      console.error(err);
-    }
+    await webBot.stop();
+    setIsBotRunning(false);
+  };
+
+  const handleDisconnectBot = async () => {
+    await webBot.disconnect();
+    setIsBotRunning(false);
+    setActiveBot(null);
   };
 
   const handleRestartBot = async () => {
@@ -169,7 +149,7 @@ export default function App() {
                 </span>
                 <span className="hidden sm:inline-flex items-center gap-1 text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Polling Mode
+                  Web Session Engine
                 </span>
               </div>
             </div>
@@ -180,7 +160,7 @@ export default function App() {
             {isBotRunning && activeBot && (
               <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
                 <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span>@{activeBot.username} (Online)</span>
+                <span>@{activeBot.username} (Live on Web)</span>
               </div>
             )}
 
@@ -199,12 +179,12 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Hero Section */}
         <div className="text-center max-w-3xl mx-auto pt-2 pb-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium mb-3">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold mb-3 shadow-sm">
+            <Clock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
             <span>
               {lang === 'bn'
-                ? 'Webhook ছাড়া সরাসরি লং-পোলিং ও রিয়েল-টাইম লগ সিস্টেম'
-                : 'Direct Long Polling & Real-Time Log System (No Webhook Needed)'}
+                ? 'যতক্ষণ এই ওয়েব পেজে থাকবেন, বট ততক্ষণ সক্রিয় থাকবে!'
+                : 'As long as this webpage is open, your bot stays live!'}
             </span>
           </div>
 
@@ -215,7 +195,7 @@ export default function App() {
                 <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
                   ক্যালকুলেটর বট
                 </span>{' '}
-                ও লাইভ লগ সিস্টেম
+                ও লাইভ ওয়েব সেশন
               </>
             ) : (
               <>
@@ -223,15 +203,15 @@ export default function App() {
                 <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
                   Calculator Bot
                 </span>{' '}
-                & Live Logger
+                & Web Engine
               </>
             )}
           </h1>
 
           <p className="mt-3 text-sm sm:text-base text-slate-400 leading-relaxed">
             {lang === 'bn'
-              ? 'এখানে শুধু আপনার টেলিগ্রাম বট টোকেন দিন—কোনো Webhook বা ব্রাউজার ট্রিগারের প্রয়োজন নেই! বটটি সাথে সাথে চালু হয়ে যাবে এবং প্রতিটি মেসেজ ও হিসাব নিচে লাইভ লগ কনসোলে দেখতে পাবেন।'
-              : 'Just provide your Telegram bot token—no webhooks or browser triggers needed! The bot connects directly via long polling, and all messages and calculations stream to the live log system.'}
+              ? 'টোকেন দিয়ে বট চালু করুন এবং এই পেজটি যেকোনো ব্রাউজারে ওপেন রাখুন। আপনি যতক্ষণ এই ওয়েবসাইটে থাকবেন, টেলিগ্রামে যে কেউ যেকোনো অঙ্ক বা সমীকরণ পাঠালে আপনার বট মিলিসেকেন্ডে উত্তর দেবে!'
+              : 'Start your bot and keep this webpage open in any browser. As long as you stay on this page, your bot answers all Telegram math equations instantly!'}
           </p>
         </div>
 
@@ -273,8 +253,8 @@ export default function App() {
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   {lang === 'bn'
-                    ? 'টোকেন দিলে সাথে সাথে বট ব্যাকগ্রাউন্ডে চালু হয়ে কাজ শুরু করবে।'
-                    : 'The bot begins working immediately upon entering your token.'}
+                    ? 'টোকেন দিয়ে স্টার্ট করলে এই পেজে সেশন চলাকালীন বট চালু থাকবে।'
+                    : 'The bot starts and runs actively as long as this page is open.'}
                 </span>
 
                 <button
@@ -309,6 +289,24 @@ export default function App() {
                     <RotateCw className="w-4 h-4 animate-spin" />
                     <span>{statusMessage || (lang === 'bn' ? 'বট চালু করা হচ্ছে...' : 'Starting bot...')}</span>
                   </>
+                ) : isBotRunning ? (
+                  <>
+                    <Zap className="w-4 h-4 text-emerald-300" />
+                    <span>
+                      {lang === 'bn'
+                        ? 'বট সচল রয়েছে — পুনরায় কানেক্ট করুন'
+                        : 'Bot is Live — Reconnect / Restart'}
+                    </span>
+                  </>
+                ) : activeBot ? (
+                  <>
+                    <Play className="w-4 h-4 fill-current text-white" />
+                    <span>
+                      {lang === 'bn'
+                        ? 'বট পুনরায় চালু করুন (Resume Bot)'
+                        : 'Resume Bot & Stream Logs'}
+                    </span>
+                  </>
                 ) : (
                   <>
                     <Zap className="w-4 h-4" />
@@ -324,17 +322,16 @@ export default function App() {
           </form>
         </div>
 
-        {/* Active Bot Status Card (If running) */}
+        {/* Active Bot Status Card (If running or configured) */}
         {activeBot && (
           <div className="max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
             <BotActiveCard
               botInfo={activeBot}
               token={tokenInput.trim()}
               isPolling={isBotRunning}
-              mode={botMode}
-              webhookUrl={botWebhookUrl}
               onStop={handleStopBot}
               onRestart={handleRestartBot}
+              onDisconnect={handleDisconnectBot}
               lang={lang}
             />
           </div>
@@ -342,7 +339,7 @@ export default function App() {
 
         {/* Feature Tabs Navigation */}
         <div className="max-w-5xl mx-auto pt-2">
-          <div className="flex items-center justify-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl mx-auto overflow-x-auto">
+          <div className="flex items-center justify-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl mx-auto overflow-x-auto">
             <button
               onClick={() => setActiveTab('logs')}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
@@ -352,7 +349,7 @@ export default function App() {
               }`}
             >
               <Terminal className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'লাইভ লগ (Logs)' : 'Live Logs'}</span>
+              <span>{lang === 'bn' ? 'লাইভ লগ (Live Logs)' : 'Live Logs'}</span>
             </button>
 
             <button
@@ -365,18 +362,6 @@ export default function App() {
             >
               <Play className="w-3.5 h-3.5" />
               <span>{lang === 'bn' ? 'চ্যাট টেস্ট' : 'Simulator'}</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('vercel')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
-                activeTab === 'vercel'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <span className="font-bold">▲</span>
-              <span>{lang === 'bn' ? 'Vercel হোস্টিং গাইড' : 'Vercel Guide'}</span>
             </button>
 
             <button
@@ -424,12 +409,6 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'vercel' && (
-              <div className="max-w-4xl mx-auto">
-                <VercelGuide lang={lang} />
-              </div>
-            )}
-
             {activeTab === 'simulator' && (
               <div className="max-w-2xl mx-auto">
                 <div className="mb-3 text-center">
@@ -473,10 +452,10 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>JavaScript Telegram Calculator Bot & Real-Time Log System</span>
+            <span>JavaScript Telegram Calculator Bot & Web Session Engine</span>
           </div>
           <div>
-            <span>Direct Long Polling • No Webhook Needed • Safe Math AST Evaluation</span>
+            <span>Runs as long as this webpage is open • Live Telemetry • Safe Math AST</span>
           </div>
         </div>
       </footer>

@@ -146,6 +146,57 @@ app.post('/api/bot/start', async (req, res) => {
   });
 });
 
+// Start Web Session & Clear Webhook
+app.post('/api/bot/start-session', async (req, res) => {
+  const { token, botInfo } = req.body;
+  if (!token) {
+    res.status(400).json({ ok: false, error: 'Token is required' });
+    return;
+  }
+  const cleanToken = token.trim();
+  await deleteBotWebhook(cleanToken);
+  logger.addLog('system', 'success', `🌐 Web session active! Bot @${botInfo?.username || 'Calculator'} is running live as long as this page is open.`, {
+    user: botInfo?.username ? `@${botInfo.username}` : 'Web Session',
+    opType: 'system',
+  });
+  res.json({ ok: true, message: 'Web session started' });
+});
+
+// Browser-Driven Poll (Runs continuously while user is on this webpage)
+app.post('/api/bot/poll', async (req, res) => {
+  const { token, offset } = req.body;
+  if (!token) {
+    res.status(400).json({ ok: false, error: 'Token is required' });
+    return;
+  }
+
+  const cleanToken = token.trim();
+  try {
+    const params = new URLSearchParams({
+      offset: String(offset || 0),
+      timeout: '12',
+      allowed_updates: JSON.stringify(['message', 'callback_query']),
+    });
+
+    const response = await fetch(`https://api.telegram.org/bot${cleanToken}/getUpdates?${params.toString()}`);
+    const data = await response.json();
+
+    if (data.ok && Array.isArray(data.result)) {
+      for (const update of data.result) {
+        processTelegramUpdate(cleanToken, update).catch((err) => {
+          logger.addLog('telegram', 'error', `Update processing error: ${err?.message || err}`);
+        });
+      }
+      res.json({ ok: true, updates: data.result });
+      return;
+    }
+
+    res.json({ ok: false, description: data.description || 'Failed to fetch updates' });
+  } catch (err: any) {
+    res.json({ ok: false, description: err?.message || 'Polling request failed' });
+  }
+});
+
 // 4. Set Webhook Explicitly (For Vercel or any cloud hosting)
 app.post('/api/bot/set-webhook', async (req, res) => {
   const { token, targetUrl } = req.body;
@@ -193,9 +244,27 @@ app.get('/api/webhook/:token', (_req, res) => {
 });
 
 // 6. Stop Bot
-app.post('/api/bot/stop', async (_req, res) => {
+app.post('/api/bot/stop', async (req, res) => {
+  const { botInfo } = req.body || {};
+  const username = botInfo?.username || 'Calculator Bot';
+  logger.addLog('system', 'warn', `🛑 বট থামানো হয়েছে: @${username} (Bot stopped by user)`, {
+    user: `@${username}`,
+    opType: 'system',
+  });
   const result = await stopBotPolling();
   res.json(result);
+});
+
+// Stop Web Session
+app.post('/api/bot/stop-session', async (req, res) => {
+  const { botInfo } = req.body || {};
+  const username = botInfo?.username || 'Calculator Bot';
+  logger.addLog('system', 'warn', `🛑 বট থামানো হয়েছে: @${username} (Web session stopped by user)`, {
+    user: `@${username}`,
+    opType: 'system',
+  });
+  await stopBotPolling();
+  res.json({ ok: true, message: 'Web session stopped' });
 });
 
 // 7. Bot Status
