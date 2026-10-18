@@ -14,7 +14,8 @@ import {
   Terminal,
   Activity,
 } from 'lucide-react';
-import { BotInfo } from './types';
+import { BotInfo, BotWorkerStatus } from './types';
+import { safeFetchJson } from './utils/api';
 import { BotActiveCard } from './components/BotActiveCard';
 import { LiveLogViewer } from './components/LiveLogViewer';
 import { TelegramSimulator } from './components/TelegramSimulator';
@@ -34,15 +35,12 @@ export default function App() {
 
   // Check initial worker status on load
   useEffect(() => {
-    fetch('/api/bot/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.isRunning && data.botInfo) {
-          setActiveBot(data.botInfo);
-          setIsBotRunning(true);
-        }
-      })
-      .catch((err) => console.error(err));
+    safeFetchJson<BotWorkerStatus>('/api/bot/status').then((res) => {
+      if (res.ok && res.data?.isRunning && res.data?.botInfo) {
+        setActiveBot(res.data.botInfo);
+        setIsBotRunning(true);
+      }
+    });
   }, []);
 
   const handlePaste = async () => {
@@ -87,16 +85,16 @@ export default function App() {
     );
 
     try {
-      const res = await fetch('/api/bot/start', {
+      const result = await safeFetchJson<{ ok: boolean; botInfo: BotInfo; description?: string }>('/api/bot/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
       });
-      const data = await res.json();
 
-      if (!data.ok) {
+      if (!result.ok || !result.data?.ok) {
         setActivationError(
-          data.description ||
+          result.error ||
+            result.data?.description ||
             (lang === 'bn'
               ? 'বট কানেক্ট করতে সমস্যা হয়েছে। টোকেনটি সঠিক কি না পরীক্ষা করুন।'
               : 'Failed to connect bot. Please verify your token.')
@@ -105,7 +103,7 @@ export default function App() {
         return;
       }
 
-      setActiveBot(data.botInfo);
+      setActiveBot(result.data.botInfo);
       setIsBotRunning(true);
       setActiveTab('logs'); // Automatically switch to logs to see live activity!
     } catch (err: any) {
@@ -117,7 +115,7 @@ export default function App() {
 
   const handleStopBot = async () => {
     try {
-      await fetch('/api/bot/stop', { method: 'POST' });
+      await safeFetchJson('/api/bot/stop', { method: 'POST' });
       setIsBotRunning(false);
     } catch (err) {
       console.error(err);

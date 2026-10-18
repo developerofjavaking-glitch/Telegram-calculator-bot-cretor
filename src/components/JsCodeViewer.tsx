@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, Check, Download, FileCode, Terminal, Sparkles } from 'lucide-react';
+import { safeFetchJson } from '../utils/api';
 
 interface Props {
   token: string;
@@ -12,13 +13,11 @@ export const JsCodeViewer: React.FC<Props> = ({ token, lang }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/bot/code?token=${encodeURIComponent(token || 'YOUR_BOT_TOKEN_HERE')}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.code) setCode(data.code);
-      })
-      .catch((err) => {
-        console.error(err);
+    safeFetchJson<{ code: string }>(`/api/bot/code?token=${encodeURIComponent(token || 'YOUR_BOT_TOKEN_HERE')}`)
+      .then((res) => {
+        if (res.ok && res.data?.code) {
+          setCode(res.data.code);
+        }
       })
       .finally(() => setLoading(false));
   }, [token]);

@@ -13,6 +13,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { LogEntry } from '../types';
+import { safeFetchJson } from '../utils/api';
 
 interface Props {
   lang: 'bn' | 'en';
@@ -33,14 +34,9 @@ export const LiveLogViewer: React.FC<Props> = ({ lang, isBotRunning }) => {
     if (isPaused) return;
 
     const fetchLogs = async () => {
-      try {
-        const res = await fetch('/api/logs?limit=150');
-        const data = await res.json();
-        if (data.logs && Array.isArray(data.logs)) {
-          setLogs(data.logs);
-        }
-      } catch (err) {
-        console.error('Failed to fetch logs:', err);
+      const res = await safeFetchJson<{ logs: LogEntry[] }>('/api/logs?limit=150');
+      if (res.ok && res.data?.logs && Array.isArray(res.data.logs)) {
+        setLogs(res.data.logs);
       }
     };
 
@@ -57,12 +53,8 @@ export const LiveLogViewer: React.FC<Props> = ({ lang, isBotRunning }) => {
   }, [logs, autoScroll]);
 
   const handleClearLogs = async () => {
-    try {
-      await fetch('/api/logs/clear', { method: 'POST' });
-      setLogs([]);
-    } catch (err) {
-      console.error(err);
-    }
+    await safeFetchJson('/api/logs/clear', { method: 'POST' });
+    setLogs([]);
   };
 
   const handleCopyLogs = () => {

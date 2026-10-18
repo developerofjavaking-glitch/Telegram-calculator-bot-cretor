@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Sparkles, RotateCcw, Bot } from 'lucide-react';
 import { SimulatorMessage } from '../types';
+import { safeFetchJson } from '../utils/api';
 
 interface Props {
   botName?: string;
@@ -54,15 +55,17 @@ export const TelegramSimulator: React.FC<Props> = ({
     setIsProcessing(true);
 
     try {
-      const res = await fetch('/api/bot/simulate', {
+      const res = await safeFetchJson<any>('/api/bot/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: userText }),
       });
-      const data = await res.json();
+      const data = res.data;
 
       let botReplyText = '';
-      if (data.type === 'command') {
+      if (!res.ok || !data) {
+        botReplyText = `⚠️ Server error (${res.error || 'Connection failed'}).`;
+      } else if (data.type === 'command') {
         botReplyText = data.message;
       } else if (data.success) {
         botReplyText = `🧮 **Calculation Result**\n━━━━━━━━━━━━━━━━━━━━\n📥 Input: \`${data.input}\`\n📤 Result: \`= ${data.result}\`\n━━━━━━━━━━━━━━━━━━━━\n✨ *Accurate calculation completed.*`;
@@ -107,14 +110,13 @@ export const TelegramSimulator: React.FC<Props> = ({
     } else if (action === '=') {
       if (!nextExpr.trim()) return;
       try {
-        const res = await fetch('/api/bot/simulate', {
+        const res = await safeFetchJson<any>('/api/bot/simulate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: nextExpr }),
         });
-        const data = await res.json();
-        if (data.success && data.result !== undefined) {
-          nextResult = data.result;
+        if (res.ok && res.data?.success && res.data?.result !== undefined) {
+          nextResult = res.data.result;
         } else {
           nextResult = 'Error';
         }
