@@ -22,6 +22,7 @@ import { TelegramSimulator } from './components/TelegramSimulator';
 import { JsCodeViewer } from './components/JsCodeViewer';
 import { BotFatherGuide } from './components/BotFatherGuide';
 import { MathCheatSheet } from './components/MathCheatSheet';
+import { VercelGuide } from './components/VercelGuide';
 
 export default function App() {
   const [lang, setLang] = useState<'bn' | 'en'>('bn');
@@ -30,8 +31,14 @@ export default function App() {
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activeBot, setActiveBot] = useState<BotInfo | null>(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState<'logs' | 'simulator' | 'code' | 'guide' | 'cheat'>('logs');
+  const [botMode, setBotMode] = useState<'webhook' | 'polling'>('polling');
+  const [botWebhookUrl, setBotWebhookUrl] = useState<string | undefined>();
+  const [activeTab, setActiveTab] = useState<'logs' | 'simulator' | 'code' | 'guide' | 'cheat' | 'vercel'>('logs');
   const [statusMessage, setStatusMessage] = useState<string>('');
+
+  const isVercelHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('vercel.dev'));
 
   // Check initial worker status on load
   useEffect(() => {
@@ -79,16 +86,30 @@ export default function App() {
     setIsActivating(true);
     setActivationError(null);
     setStatusMessage(
-      lang === 'bn'
+      isVercelHost
+        ? lang === 'bn'
+          ? 'Vercel Serverless Webhook কানেক্ট করা হচ্ছে...'
+          : 'Connecting Vercel Serverless Webhook...'
+        : lang === 'bn'
         ? 'টেলিগ্রাম সার্ভারের সাথে সরাসরি লং-পোলিং কানেক্ট করা হচ্ছে...'
         : 'Connecting to Telegram servers via Long Polling...'
     );
 
     try {
-      const result = await safeFetchJson<{ ok: boolean; botInfo: BotInfo; description?: string }>('/api/bot/start', {
+      const result = await safeFetchJson<{
+        ok: boolean;
+        mode?: 'webhook' | 'polling';
+        webhookUrl?: string;
+        botInfo: BotInfo;
+        description?: string;
+      }>('/api/bot/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({
+          token,
+          targetUrl: window.location.origin,
+          mode: isVercelHost ? 'webhook' : 'auto',
+        }),
       });
 
       if (!result.ok || !result.data?.ok) {
@@ -105,6 +126,8 @@ export default function App() {
 
       setActiveBot(result.data.botInfo);
       setIsBotRunning(true);
+      setBotMode(result.data.mode || 'polling');
+      setBotWebhookUrl(result.data.webhookUrl);
       setActiveTab('logs'); // Automatically switch to logs to see live activity!
     } catch (err: any) {
       setActivationError(err.message || 'Connection error. Please try again.');
@@ -308,6 +331,8 @@ export default function App() {
               botInfo={activeBot}
               token={tokenInput.trim()}
               isPolling={isBotRunning}
+              mode={botMode}
+              webhookUrl={botWebhookUrl}
               onStop={handleStopBot}
               onRestart={handleRestartBot}
               lang={lang}
@@ -317,65 +342,77 @@ export default function App() {
 
         {/* Feature Tabs Navigation */}
         <div className="max-w-5xl mx-auto pt-2">
-          <div className="flex items-center justify-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl mx-auto overflow-x-auto">
+          <div className="flex items-center justify-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl mx-auto overflow-x-auto">
             <button
               onClick={() => setActiveTab('logs')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'logs'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Terminal className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'লাইভ লগ সিস্টেম (Logs)' : 'Live Log System'}</span>
+              <span>{lang === 'bn' ? 'লাইভ লগ (Logs)' : 'Live Logs'}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('simulator')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'simulator'
                   ? 'bg-sky-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Play className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'চ্যাট সিমুলেটর' : 'Chat Simulator'}</span>
+              <span>{lang === 'bn' ? 'চ্যাট টেস্ট' : 'Simulator'}</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('vercel')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeTab === 'vercel'
+                  ? 'bg-purple-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span className="font-bold">▲</span>
+              <span>{lang === 'bn' ? 'Vercel হোস্টিং গাইড' : 'Vercel Guide'}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('code')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'code'
                   ? 'bg-sky-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Code2 className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'জাভাস্ক্রিপ্ট কোড (JS)' : 'JavaScript Code'}</span>
+              <span>{lang === 'bn' ? 'JS কোড' : 'Code (JS)'}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('guide')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'guide'
                   ? 'bg-sky-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <HelpCircle className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'বট তৈরি নির্দেশিকা' : 'BotFather Guide'}</span>
+              <span>{lang === 'bn' ? 'বট তৈরি গাইড' : 'BotFather'}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('cheat')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'cheat'
                   ? 'bg-sky-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Calculator className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'হিসাবের তালিকা' : 'Math Features'}</span>
+              <span>{lang === 'bn' ? 'হিসাব তালিকা' : 'Math Features'}</span>
             </button>
           </div>
 
@@ -384,6 +421,12 @@ export default function App() {
             {activeTab === 'logs' && (
               <div className="max-w-4xl mx-auto">
                 <LiveLogViewer lang={lang} isBotRunning={isBotRunning} />
+              </div>
+            )}
+
+            {activeTab === 'vercel' && (
+              <div className="max-w-4xl mx-auto">
+                <VercelGuide lang={lang} />
               </div>
             )}
 

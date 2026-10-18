@@ -8,6 +8,9 @@ import {
   Activity,
   Bot,
   Zap,
+  Cloud,
+  Check,
+  Copy,
 } from 'lucide-react';
 import { BotInfo } from '../types';
 
@@ -15,6 +18,8 @@ interface Props {
   botInfo: BotInfo;
   token: string;
   isPolling: boolean;
+  mode?: 'webhook' | 'polling';
+  webhookUrl?: string;
   onStop: () => void;
   onRestart: () => void;
   lang: 'bn' | 'en';
@@ -22,13 +27,17 @@ interface Props {
 
 export const BotActiveCard: React.FC<Props> = ({
   botInfo,
+  token,
   isPolling,
+  mode = 'polling',
+  webhookUrl,
   onStop,
   onRestart,
   lang,
 }) => {
   const [stopping, setStopping] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const handleStop = async () => {
     setStopping(true);
@@ -48,7 +57,16 @@ export const BotActiveCard: React.FC<Props> = ({
     }
   };
 
+  const handleCopyUrl = () => {
+    if (webhookUrl) {
+      navigator.clipboard.writeText(webhookUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    }
+  };
+
   const botTelegramUrl = botInfo.username ? `https://t.me/${botInfo.username}` : null;
+  const isWebhookMode = mode === 'webhook';
 
   return (
     <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl p-6 shadow-2xl backdrop-blur-md relative overflow-hidden">
@@ -61,25 +79,15 @@ export const BotActiveCard: React.FC<Props> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-white">{botInfo.first_name}</h2>
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                  isPolling
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    isPolling ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-                  }`}
-                ></span>
-                {isPolling
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                {isWebhookMode
                   ? lang === 'bn'
-                    ? 'সক্রিয় / কানেক্টেড'
-                    : 'Online & Running'
+                    ? 'Vercel Webhook সক্রিয়'
+                    : 'Vercel Webhook Active'
                   : lang === 'bn'
-                  ? 'থামানো আছে'
-                  : 'Stopped'}
+                  ? 'লং পোলিং সক্রিয়'
+                  : 'Long Polling Active'}
               </span>
             </div>
             <p className="text-sm text-slate-400">
@@ -97,13 +105,33 @@ export const BotActiveCard: React.FC<Props> = ({
             className="inline-flex items-center gap-2 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm shadow-lg shadow-sky-500/25 transition-all transform hover:-translate-y-0.5 cursor-pointer"
           >
             <Send className="w-4 h-4" />
-            <span>{lang === 'bn' ? 'টেলিগ্রামে বটের সাথে চ্যাট করুন' : 'Open Bot in Telegram'}</span>
+            <span>{lang === 'bn' ? 'টেলিগ্রামে চ্যাট শুরু করুন' : 'Open Bot in Telegram'}</span>
             <ExternalLink className="w-3.5 h-3.5 opacity-80" />
           </a>
         )}
       </div>
 
-      {/* Info Card explaining Long Polling */}
+      {/* Webhook endpoint box if in webhook mode */}
+      {isWebhookMode && webhookUrl && (
+        <div className="mt-4 bg-slate-950/80 border border-emerald-500/30 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-slate-300 font-semibold">
+              {lang === 'bn' ? 'Vercel Webhook URL:' : 'Active Webhook Endpoint:'}
+            </span>
+            <code className="font-mono text-teal-300 truncate max-w-xs">{webhookUrl}</code>
+          </div>
+          <button
+            onClick={handleCopyUrl}
+            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-[11px] cursor-pointer"
+          >
+            {copiedUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedUrl ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Info Card explaining Connection */}
       <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex items-start gap-3">
           <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
@@ -111,10 +139,20 @@ export const BotActiveCard: React.FC<Props> = ({
           </div>
           <div>
             <h4 className="text-xs font-semibold text-slate-200">
-              {lang === 'bn' ? 'ডিরেক্ট লং পোলিং মোড' : 'Direct Long Polling'}
+              {isWebhookMode
+                ? lang === 'bn'
+                  ? 'Vercel Serverless Ready'
+                  : 'Vercel Serverless Ready'
+                : lang === 'bn'
+                ? 'ডিরেক্ট লং পোলিং মোড'
+                : 'Direct Long Polling'}
             </h4>
             <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-              {lang === 'bn'
+              {isWebhookMode
+                ? lang === 'bn'
+                  ? 'টেলিগ্রাম থেকে যেকোনো হিসাবের রিকোয়েস্ট স্বয়ংক্রিয়ভাবে Vercel-এ চলে আসবে এবং ২৪/৭ ফ্রি চলবে।'
+                  : 'Telegram automatically posts to Vercel and calculates results 24/7 for free.'
+                : lang === 'bn'
                 ? 'কোনো Webhook বা আলাদা URL ট্রিগারের ঝামেলা নেই। সার্ভার সরাসরি টেলিগ্রামের সাথে যুক্ত।'
                 : 'Zero webhook configuration. Connects directly to Telegram servers.'}
             </p>
@@ -172,10 +210,18 @@ export const BotActiveCard: React.FC<Props> = ({
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition cursor-pointer disabled:opacity-50"
           >
             <RotateCw className={`w-3.5 h-3.5 ${restarting ? 'animate-spin' : ''}`} />
-            <span>{lang === 'bn' ? 'পুনরায় কানেক্ট করুন' : 'Restart Worker'}</span>
+            <span>
+              {isWebhookMode
+                ? lang === 'bn'
+                  ? 'Webhook রি-কানেক্ট'
+                  : 'Re-sync Webhook'
+                : lang === 'bn'
+                ? 'পুনরায় কানেক্ট'
+                : 'Restart Worker'}
+            </span>
           </button>
 
-          {isPolling ? (
+          {!isWebhookMode && isPolling && (
             <button
               onClick={handleStop}
               disabled={stopping}
@@ -183,14 +229,6 @@ export const BotActiveCard: React.FC<Props> = ({
             >
               <Power className="w-3.5 h-3.5 text-rose-400" />
               <span>{lang === 'bn' ? 'বট থামান' : 'Stop Bot'}</span>
-            </button>
-          ) : (
-            <button
-              onClick={handleRestart}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition cursor-pointer shadow-md shadow-emerald-900/30"
-            >
-              <Power className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'বট চালু করুন' : 'Start Bot'}</span>
             </button>
           )}
         </div>

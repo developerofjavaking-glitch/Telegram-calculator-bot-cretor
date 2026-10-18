@@ -52,6 +52,18 @@ export async function getBotInfo(token: string): Promise<{ ok: boolean; result?:
   }
 }
 
+export async function setBotWebhook(token: string, webhookUrl: string): Promise<{ ok: boolean; result?: boolean; description?: string }> {
+  try {
+    return await fetchTelegramApi(token, 'setWebhook', {
+      url: webhookUrl,
+      drop_pending_updates: false,
+      allowed_updates: ['message', 'callback_query'],
+    });
+  } catch (err: any) {
+    return { ok: false, description: err?.message || 'Failed to set webhook' };
+  }
+}
+
 export async function deleteBotWebhook(token: string): Promise<{ ok: boolean; result?: boolean; description?: string }> {
   try {
     return await fetchTelegramApi(token, 'deleteWebhook', { drop_pending_updates: false });
@@ -114,8 +126,17 @@ export async function processTelegramUpdate(token: string, update: any) {
     const messageId = cq.message?.message_id;
     const action = cq.data || '';
     const userFrom = cq.from?.username ? `@${cq.from.username}` : (cq.from?.first_name || 'User');
+    const userId = cq.from?.id;
+    const buttonLabel = action.replace('calc:', '');
 
-    logger.addLog('keypad', 'info', `🔘 Button [${action.replace('calc:', '')}] clicked by ${userFrom}`);
+    logger.addLog('keypad', 'info', `🔘 Button [${buttonLabel}] clicked by ${userFrom}`, {
+      user: userFrom,
+      userId,
+      chatId,
+      messageId,
+      button: buttonLabel,
+      opType: 'keypad',
+    });
 
     if (!chatId || !messageId) {
       await answerTelegramCallbackQuery(token, cq.id);
@@ -130,26 +151,54 @@ export async function processTelegramUpdate(token: string, update: any) {
       session.expr = '';
       session.lastResult = undefined;
       await answerTelegramCallbackQuery(token, cq.id, 'Cleared');
-      logger.addLog('calc', 'info', `🔄 Keypad display cleared for Chat ${chatId}`);
+      logger.addLog('calc', 'info', `🔄 Keypad display cleared for Chat ${chatId}`, {
+        user: userFrom,
+        userId,
+        chatId,
+        messageId,
+        opType: 'keypad',
+      });
     } else if (action === 'calc:del') {
       if (session.expr.length > 0) {
         session.expr = session.expr.slice(0, -1);
       }
       await answerTelegramCallbackQuery(token, cq.id);
+    } else if (action === '=') {
+      // Handled in calc:=
     } else if (action === 'calc:=') {
       if (!session.expr.trim()) {
         note = 'Please enter an expression first';
         await answerTelegramCallbackQuery(token, cq.id, 'Expression is empty');
       } else {
+        const tStart = performance.now();
         const evalRes = safeEvaluate(session.expr);
+        const durationMs = Math.round((performance.now() - tStart) * 10) / 10;
+
         if (evalRes.success && evalRes.result !== undefined) {
           session.lastResult = evalRes.result;
           await answerTelegramCallbackQuery(token, cq.id, `= ${evalRes.result}`);
-          logger.addLog('calc', 'success', `🧮 Keypad calculated: "${session.expr}" = ${evalRes.result} for ${userFrom}`);
+          logger.addLog('calc', 'success', `🧮 Keypad calculated: "${session.expr}" = ${evalRes.result} (${durationMs}ms)`, {
+            user: userFrom,
+            userId,
+            chatId,
+            messageId,
+            input: session.expr,
+            result: evalRes.result,
+            durationMs,
+            opType: 'keypad',
+          });
         } else {
           note = evalRes.error || 'Calculation error';
           await answerTelegramCallbackQuery(token, cq.id, 'Error in calculation');
-          logger.addLog('calc', 'warn', `⚠️ Keypad calculation error on "${session.expr}": ${note}`);
+          logger.addLog('calc', 'warn', `⚠️ Keypad calculation error on "${session.expr}": ${note}`, {
+            user: userFrom,
+            userId,
+            chatId,
+            messageId,
+            input: session.expr,
+            error: note,
+            opType: 'keypad',
+          });
         }
       }
     } else if (action === 'calc:help') {
@@ -193,8 +242,16 @@ export async function processTelegramUpdate(token: string, update: any) {
     const rawText = msg.text.trim();
     const userFirstName = msg.from?.first_name || 'Friend';
     const userHandle = msg.from?.username ? `@${msg.from.username}` : userFirstName;
+    const userId = msg.from?.id;
 
-    logger.addLog('telegram', 'info', `📥 Message from ${userHandle} (Chat ${chatId}): "${rawText}"`);
+    logger.addLog('telegram', 'info', `📥 Message from ${userHandle} (Chat ${chatId}): "${rawText}"`, {
+      user: userHandle,
+      userId,
+      chatId,
+      messageId: msg.message_id,
+      rawText,
+      opType: 'command',
+    });
 
     // Start / Help / Calc command
     if (rawText.startsWith('/start') || rawText.startsWith('/help') || rawText === '/calc') {
@@ -225,7 +282,12 @@ export async function processTelegramUpdate(token: string, update: any) {
         });
       }
 
-      logger.addLog('telegram', 'success', `📤 Sent welcome message & keypad to ${userHandle} (Chat ${chatId})`);
+      logger.addLog('telegram', 'success', `📤 Sent welcome message & keypad to ${userHandle} (Chat ${chatId})`, {
+        user: userHandle,
+        userId,
+        chatId,
+        opType: 'command',
+      });
       return;
     }
 
@@ -235,10 +297,28 @@ export async function processTelegramUpdate(token: string, update: any) {
       mathExpr = mathExpr.replace('/calc ', '').trim();
     }
 
+    let opType: 'arithmetic' | 'percentage' | 'root' | 'power' | 'trig' = 'arithmetic';
+    if (mathExpr.includes('%')) opType = 'percentage';
+    else if (/sqrt|cbrt/.test(mathExpr)) opType = 'root';
+    else if (mathExpr.includes('^')) opType = 'power';
+    else if (/sin|cos|tan|log/.test(mathExpr)) opType = 'trig';
+
+    const tStart = performance.now();
     const evalRes = safeEvaluate(mathExpr);
+    const durationMs = Math.round((performance.now() - tStart) * 10) / 10;
 
     if (evalRes.success && evalRes.result !== undefined) {
-      logger.addLog('calc', 'success', `🧮 Evaluated: "${mathExpr}" = ${evalRes.result} for ${userHandle}`);
+      logger.addLog('calc', 'success', `🧮 Evaluated: "${mathExpr}" = ${evalRes.result} (${durationMs}ms)`, {
+        user: userHandle,
+        userId,
+        chatId,
+        messageId: msg.message_id,
+        rawText,
+        input: mathExpr,
+        result: evalRes.result,
+        durationMs,
+        opType,
+      });
 
       const reply =
         `🧮 *Calculation Result*\n━━━━━━━━━━━━━━━━━━━━\n` +
@@ -247,11 +327,24 @@ export async function processTelegramUpdate(token: string, update: any) {
         `💡 _Send another calculation anytime or type /calc for keypad!_`;
 
       await sendTelegramMessage(token, chatId, reply);
-      logger.addLog('telegram', 'success', `📤 Reply sent to ${userHandle}: "= ${evalRes.result}"`);
+      logger.addLog('telegram', 'success', `📤 Reply sent to ${userHandle}: "= ${evalRes.result}"`, {
+        user: userHandle,
+        userId,
+        chatId,
+        opType,
+      });
     } else {
       const looksLikeMath = /[0-9\+\-\*\/\%\^\(\)\=]|sqrt|sin|cos|tan|pi|log/i.test(mathExpr);
       if (looksLikeMath || rawText.startsWith('/')) {
-        logger.addLog('calc', 'warn', `⚠️ Math syntax error for "${mathExpr}": ${evalRes.error}`);
+        logger.addLog('calc', 'warn', `⚠️ Math syntax error for "${mathExpr}": ${evalRes.error}`, {
+          user: userHandle,
+          userId,
+          chatId,
+          messageId: msg.message_id,
+          input: mathExpr,
+          error: evalRes.error,
+          opType,
+        });
         const errorReply =
           `⚠️ *Could not calculate:*\n\`${mathExpr}\`\n\n` +
           `❌ *Error:* ${evalRes.error || 'Invalid syntax'}\n\n` +
@@ -262,7 +355,11 @@ export async function processTelegramUpdate(token: string, update: any) {
           `🤖 *I am your Calculator Bot!*\n\n` +
           `Please send any mathematical expression (e.g. \`50 * 12 + 100\`) or type \`/calc\` to open the interactive keypad!`;
         await sendTelegramMessage(token, chatId, hintReply, getCalculatorKeyboard(''));
-        logger.addLog('telegram', 'info', `📤 Sent hint guide to ${userHandle}`);
+        logger.addLog('telegram', 'info', `📤 Sent hint guide to ${userHandle}`, {
+          user: userHandle,
+          chatId,
+          opType: 'command',
+        });
       }
     }
   }
